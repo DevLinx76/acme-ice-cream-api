@@ -1,83 +1,91 @@
+// Purpose: to create a server that will allow the user to interact with a database of ice cream flavors.
+const pg = require('pg');
 const express = require('express');
-const { Pool } = require('pg');
-const morgan = require('morgan');
+const client = new pg.Client(process.env.DATABASE_URL || 'postgres://localhost/the_acme_flavors_db');
 const app = express();
 
+// Middleware
 app.use(express.json());
-app.use(morgan('dev'));
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgres://localhost/acme_ice_cream_shop_db',
+// Logging
+app.use(require('morgan')('dev'));
+
+// Read Flavors - R
+app.get('/api/flavors', async (req, res, next) => {
+  try {
+    const SQL = 'SELECT * from flavors ORDER BY created_at DESC;';
+    const response = await client.query(SQL);
+    res.send(response.rows);
+  } catch (ex) {
+    next(ex);
+  }
 });
 
-// Function to initialize database and start server
+// Create Flavor - C
+app.post('/api/flavors', async (req, res, next) => {
+  try {
+    const SQL = 'INSERT INTO flavors(name, s_favorite) VALUES($1, $2) RETURNING *';
+    const response = await client.query(SQL, [req.body.name, req.body.s_favorite]);
+    res.send(response.rows[0]);
+  } catch (ex) {
+    next(ex);
+  }
+});
+
+// Update Flavor - U
+app.put('/api/flavors/:id', async (req, res, next) => {
+  try {
+    const SQL = 'UPDATE flavors SET name=$1, s_favorite=$2, updated_at=now() WHERE id=$3 RETURNING *';
+    const response = await client.query(SQL, [req.body.name, req.body.s_favorite, req.params.id]);
+    res.send(response.rows[0]);
+  } catch (ex) {
+    next(ex);
+  }
+});
+
+// Delete a Flavor - D
+app.delete('/api/flavors/:id', async (req, res, next) => {
+  try {
+    const SQL = 'DELETE from flavors WHERE id=$1 RETURNING *';
+    const response = await client.query(SQL, [req.params.id]);
+    res.sendStatus(204);
+  } catch (ex) {
+    next(ex);
+  }
+});
+
+// Create and run the express app
 const init = async () => {
-  // Connect to the database
-  await pool.connect();
-  console.log('connected to database');
+  await client.connect();
 
-  // Create flavors table
-  let SQL = `
-    DROP TABLE IF EXISTS flavors;
-    CREATE TABLE flavors (
-      id SERIAL PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      s_favorite BOOLEAN DEFAULT false,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-  `;
-  await pool.query(SQL);
-  console.log('tables created');
+  let SQL = `         
+        DROP TABLE IF EXISTS flavors;
 
-  // Seed the table with initial flavors
-  SQL = `
-    INSERT INTO flavors (name, s_favorite) VALUES 
-    ('Vanilla', true),
-    ('Chocolate', false),
-    ('Strawberry', false);
-  `;
-  await pool.query(SQL);
-  console.log('data seeded');
+        CREATE TABLE flavors (            
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            s_favorite BOOLEAN DEFAULT false,
+            created_at TIMESTAMP DEFAULT now(),
+            updated_at TIMESTAMP DEFAULT now()
+        );
+    `
+  await client.query(SQL);
+  console.log('Flavors table created');
 
-  // Start listening on the port
-  const port = process.env.PORT || 3000;
-  app.listen(port, () => console.log(`listening on port ${port}`));
+  // Seed data with initial flavors
+  SQL = ` 
+        INSERT INTO flavors(name, s_favorite) VALUES('Vanilla', true);
+        INSERT INTO flavors(name, s_favorite) VALUES('Chocolate', false);
+        INSERT INTO flavors(name, s_favorite) VALUES('Strawberry', true);
+    `
+  await client.query(SQL);
+  console.log('Initial flavors data seeded');
+
+  // Start the server
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`Listening on port ${PORT}`);
+  });
 };
 
-app.get('/api/flavors', async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM flavors;');
-  res.send(rows);
-});
-
-app.get('/api/flavors/:id', async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM flavors WHERE id = $1;', [req.params.id]);
-  if(rows.length === 0) {
-    return res.status(404).send('Flavor not found');
-  }
-  res.send(rows[0]);
-});
-
-app.post('/api/flavors', async (req, res) => {
-  const { name, s_favorite } = req.body;
-  const { rows } = await pool.query('INSERT INTO flavors (name, s_favorite) VALUES ($1, $2) RETURNING *;', [name, s_favorite]);
-  res.status(201).send(rows[0]);
-});
-
-app.delete('/api/flavors/:id', async (req, res) => {
-  await pool.query('DELETE FROM flavors WHERE id = $1;', [req.params.id]);
-  res.status(204).send();
-});
-
-app.put('/api/flavors/:id', async (req, res) => {
-  const { name, s_favorite } = req.body;
-  const { rows } = await pool.query('UPDATE flavors SET name = $1, s_favorite = $2, updated_at = NOW() WHERE id = $3 RETURNING *;', [name, s_favorite, req.params.id]);
-  if(rows.length === 0) {
-    return res.status(404).send('Flavor not found');
-  }
-  res.send(rows[0]);
-});
-
-// Invoke the init function to start the application
 init();
-
