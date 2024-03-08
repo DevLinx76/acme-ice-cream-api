@@ -80,3 +80,4 @@ app.put('/api/flavors/:id', async (req, res) => {
 
 // Invoke the init function to start the application
 init();
+
